@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Учёт посещаемости преподавателей — IT & Business College AIU</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen pb-20">
+
+  <!-- ОСНОВНОЙ ИНТЕРФЕЙС -->
+  <div id="appContent">
+    <!-- Шапка -->
+    <header class="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">
+      <div class="max-w-3xl mx-auto px-3 py-2.5 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+            AIU
+          </div>
+          <div class="min-w-0">
+            <div class="text-sm font-bold text-slate-900 truncate">Журнал методиста</div>
+            <div class="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <span id="dbStatusBadge" class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              <span id="dbStatusText">Локальный журнал — без синхронизации</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <input
+            type="date"
+            id="datePicker"
+            onchange="onDateChange()"
+            class="text-xs font-medium bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            onclick="openWhatsAppModal()"
+            class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-xs transition flex items-center gap-1"
+          >
+            <span>WhatsApp</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Лента 10 уроков -->
+      <div class="max-w-3xl mx-auto px-3 pb-2.5">
+        <div id="lessonsBar" class="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5"></div>
+        <div class="flex flex-wrap gap-2 pt-2">
+          <button onclick="exportWeeklyExcel()" class="flex-1 min-w-[135px] bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">Недельный Excel</button>
+          <button onclick="exportFullExcel()" class="flex-1 min-w-[125px] bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg">Полный Excel</button>
+          <button onclick="backupAttendance()" class="flex-1 min-w-[125px] bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-2 rounded-lg">Резервная копия</button>
+        </div>
+        <input id="restoreFileInput" type="file" accept="application/json,.json" class="hidden" onchange="restoreAttendance(event)" />
+        <div class="flex justify-end pt-1">
+          <button onclick="document.getElementById('restoreFileInput').click()" class="text-[11px] text-blue-700 underline">Восстановить из копии</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Поиск и фильтр -->
+    <main class="max-w-3xl mx-auto px-3 pt-3">
+      <div class="bg-white rounded-xl border border-slate-200 p-2.5 mb-3 shadow-2xs">
+        <div class="flex flex-col sm:flex-row gap-2">
+          <div class="relative flex-1">
+            <input
+              id="searchInput"
+              type="text"
+              oninput="renderTeachers()"
+              placeholder="Поиск преподавателя..."
+              class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-sm focus:outline-none focus:border-blue-500"
+            />
+            <button
+              id="clearSearchBtn"
+              onclick="document.getElementById('searchInput').value=''; renderTeachers();"
+              class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-sm font-bold"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div class="flex bg-slate-100 p-1 rounded-lg text-xs font-semibold shrink-0">
+            <button
+              id="filterAllBtn"
+              onclick="setFilter('all')"
+              class="flex-1 sm:flex-initial px-3 py-1.5 rounded-md bg-white text-slate-900 shadow-2xs transition"
+            >
+              Все (<span id="teacherCountLabel">0</span>)
+            </button>
+            <button
+              id="filterAbsentBtn"
+              onclick="setFilter('absent')"
+              class="flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-slate-600 transition"
+            >
+              Отсутствуют (<span id="absentCountLabel">0</span>)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Список преподавателей -->
+      <div id="teachersList" class="space-y-2"></div>
+    </main>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО WHATSAPP -->
+  <div id="waModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="text-sm font-bold text-slate-900">Отправка сводки в WhatsApp</h2>
+        <button onclick="closeWhatsAppModal()" class="text-slate-400 hover:text-slate-700 text-lg font-bold px-2">✕</button>
+      </div>
+
+      <div class="p-4 overflow-y-auto space-y-4">
+        <!-- Режим отчёта -->
+        <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+          <button
+            id="waModeLesson"
+            onclick="setWaMode('lesson')"
+            class="flex-1 py-2 rounded-lg bg-white text-slate-900 shadow-2xs transition"
+          >
+            Текущий урок (<span id="waLessonNum">1</span>)
+          </button>
+          <button
+            id="waModeDay"
+            onclick="setWaMode('day')"
+            class="flex-1 py-2 rounded-lg text-slate-600 transition"
+          >
+            За весь день
+          </button>
+        </div>
+
+        <!-- Предпросмотр текста -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-semibold text-slate-600">Текст сообщения:</span>
+            <button onclick="copyWaText()" class="text-xs font-semibold text-blue-600 hover:underline">
+              Скопировать текст
+            </button>
+          </div>
+          <textarea
+            id="waPreviewText"
+            rows="6"
+            class="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-mono focus:outline-none focus:border-emerald-500"
+          ></textarea>
+        </div>
+
+        <!-- Отправить в общий чат / группу -->
+        <button
+          onclick="sendToAnyChat()"
+          class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-4 rounded-xl text-xs transition flex items-center justify-center gap-2"
+        >
+          <span>Выбрать чат или группу в WhatsApp</span>
+        </button>
+
+        <!-- Список нужных людей -->
+        <div class="border-t border-slate-200 pt-3">
+          <div class="text-xs font-bold text-slate-800 mb-2">Нужные получатели (в 1 клик):</div>
+          <div id="recipientsList" class="space-y-1.5 mb-3"></div>
+
+          <!-- Форма добавления получателя -->
+          <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+            <div class="text-[11px] font-semibold text-slate-500">Добавить контакт:</div>
+            <div class="grid grid-cols-2 gap-2">
+              <input
+                id="recName"
+                type="text"
+                placeholder="Имя (напр. Завуч)"
+                class="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
+              />
+              <input
+                id="recPhone"
+                type="tel"
+                placeholder="0555 123 456"
+                class="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <button
+              onclick="addRecipient()"
+              class="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold py-1.5 rounded-lg transition"
+            >
+              + Сохранить контакт
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Всплывающее уведомление -->
+  <div id="toast" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-medium px-4 py-2.5 rounded-full shadow-lg"></div>
+
+  <div class="max-w-3xl mx-auto px-3 mt-4 text-[10px] text-slate-400 text-center">
+    Данные хранятся в браузере этого устройства. Регулярно скачивайте полный Excel-отчёт как резервную копию.
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    // ==========================================
+    // НАСТРОЙКИ КОЛЛЕДЖА
+    // ==========================================
+    // Журнал работает локально на устройстве методиста. Синхронизация отключена.
+
+    // Безопасная обёртка для хранилища (работает даже внутри iframe в Safari / iPhone)
+    let memoryFallback = {};
+
+    // Расписание 10 уроков (40 минут)
+    const LESSONS = [
+      { id: 1, start: "08:30", end: "09:10" },
+      { id: 2, start: "09:15", end: "09:55" },
+      { id: 3, start: "10:00", end: "10:40" },
+      { id: 4, start: "10:45", end: "11:25" },
+      { id: 5, start: "11:30", end: "12:10" },
+      { id: 6, start: "13:00", end: "13:40" },
+      { id: 7, start: "13:45", end: "14:25" },
+      { id: 8, start: "14:30", end: "15:10" },
+      { id: 9, start: "15:15", end: "15:55" },
+      { id: 10, start: "16:00", end: "16:40" }
+    ];
+
+    // Актуальный список 72 преподавателей из EduPage
+    const TEACHERS = [
+      "Aida Abdyrazak", "Baktygul Abekova", "Aidana Abylova", "Akylai Uraimzhan kyzy",
+      "Zamir Chynybekov", "Gulnura Dyikanbaeva", "Nurzada Ergeshova", "Irshad Gulbarga",
+      "Aizhamal Imankulova", "Khadidzha Khazhazh", "Nargiza Kutmanova", "Nurzhan Nazarkulova",
+      "Aizada Omurkulova", "Gulshaiyr Samatova", "Ainura Dyikanova", "Zhaigul Seitalieva",
+      "Azat Shayimbek uulu", "Suyun Shermatov", "Nurzat Usupova", "Dastan Satybaev",
+      "Emilbek Zholdoshbekov", "Arzymat Zhoroev", "Zhyldyz Indigaraeva", "Aizada Mambetsadykova",
+      "Aliya Abdraeva", "Murat Dzhaparov", "Kubanych Dzhyrgalbekov", "Dosbol Aliev",
+      "Talant Arystanov", "Salidat Isaeva", "Mirlan Nurbekov", "Kamila Ibraimova",
+      "Azizbek Karimov", "Erbol Bolushev", "Zhenishbek Orozakhunov", "Larisa Alimpieva",
+      "C Chokusheva", "S.M Alymbekova", "Ainazik Atabaeva", "Baktygul Batyralieva",
+      "Zhyldyz Kayipberdieva", "Eldar Jorobekov", "Salia Kurmanova", "Aidar Asakeev",
+      "Akusheva Aigerim", "Feruza Kubanychbek kyzy", "Aiperi Toktosunova", "Bekmyrza Alyshbaev",
+      "Mederbek Tashtanov", "Evgenii Badilovskii", "Saltanat Derkenbaeva", "Saodat Amanbaeva",
+      "Adil Musaev", "Altynai Saidalieva", "Meerim Mairykova", "Quintin Gay",
+      "Mairam Kenzhebek kyzy", "Iskender Kochkorbaev", "Akmaral Nurbek kyzy", "Nurlanbek Mannap uulu",
+      "Farhat Nazarbaev", "Amanbek Checheibaev", "Raushan Belekova", "Nazarbek Akylbek uulu",
+      "Leila Ibragimova", "Nurzada Kartaeva", "Irina Yalchinkaya", "Nicholas Andersen",
+      "Aida Supaeva", "Kanyshai Murzalymbekova", "Erika Erika", "Aizada Turdakun kyzy"
+    ];
+
+    const QUICK_NOTES = ["опоздал(а)", "замена", "болеет", "отпросился(ась)"];
+
+    // Состояние приложения
+    let currentDate = getTodayStr();
+    let currentLesson = detectCurrentLesson();
+    let currentFilter = "all";
+    let waMode = "lesson";
+    let attendanceData = {};
+    let recipients = [];
+    try {
+      recipients = JSON.parse(safeGet("aiu_wa_recipients", "[]"));
+    } catch (e) {
+      recipients = [];
+    }
+
+    // ==========================================
+    // ИНИЦИАЛИЗАЦИЯ
+    // ==========================================
+    window.addEventListener("DOMContentLoaded", async () => {
+      document.getElementById("datePicker").value = currentDate;
+
+      setDbStatus("Локальный журнал — без синхронизации");
+      document.getElementById("teacherCountLabel").textContent = TEACHERS.length;
+
+      await loadDayData(currentDate);
+      renderLessonsBar();
+      renderTeachers();
+    });
+
+    function getTodayStr() {
+      const d = new Date();
+      const offset = d.getTimezoneOffset() * 60000;
+      return new Date(d.getTime() - offset).toISOString().split("T")[0];
+    }
+
+    function detectCurrentLesson() {
+      const now = new Date();
+      const mins = now.getHours() * 60 + now.getMinutes();
+      for (const l of LESSONS) {
+        const [sh, sm] = l.start.split(":").map(Number);
+        const [eh, em] = l.end.split(":").map(Number);
+        if (mins >= sh * 60 + sm - 5 && mins <= eh * 60 + em) {
+          return l.id;
+        }
+      }
+      return 1;
+    }
+
+    // ==========================================
+    // ЛОКАЛЬНОЕ ХРАНЕНИЕ ДАННЫХ
+    // ==========================================
+    function setDbStatus(message) {
+      const badge = document.getElementById("dbStatusBadge");
+      const text = document.getElementById("dbStatusText");
+      if (badge) badge.className = "inline-block w-1.5 h-1.5 rounded-full bg-amber-500";
+      if (text) text.textContent = message;
+    }
+
+    function safeGet(key, fallback) {
+      try {
+        const value = localStorage.getItem(key);
+        return value === null ? fallback : value;
+      } catch (e) {
+        return Object.prototype.hasOwnProperty.call(memoryFallback, key)
+          ? memoryFallback[key] : fallback;
+      }
+    }
+
+    function safeSet(key, val) {
+      memoryFallback[key] = val;
+      try {
+        localStorage.setItem(key, val);
+        return true;
+      } catch (e) {
+        setDbStatus("Ошибка локального хранения");
+        showToast("Не удалось сохранить данные. Освободите память браузера.");
+        return false;
+      }
+    }
+
+    function readLocalAttendance() {
+      try {
+        const parsed = JSON.parse(safeGet("aiu_attendance_v1", "{}"));
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveLocal() {
+      const local = readLocalAttendance();
+      local[currentDate] = attendanceData[currentDate] || {};
+      return safeSet("aiu_attendance_v1", JSON.stringify(local));
+    }
+
+    async function loadDayData(dateStr) {
+      const local = readLocalAttendance();
+      attendanceData[dateStr] = local[dateStr] || {};
+      setDbStatus("Локальный журнал — без синхронизации");
+    }
+
+    async function toggleAbsent(teacher) {
+      if (!attendanceData[currentDate]) attendanceData[currentDate] = {};
+      if (!attendanceData[currentDate][currentLesson]) attendanceData[currentDate][currentLesson] = {};
+      const lessonMap = attendanceData[currentDate][currentLesson];
+
+      if (lessonMap[teacher]) delete lessonMap[teacher];
+      else lessonMap[teacher] = { note: "" };
+
+      saveLocal();
+      renderLessonsBar();
+      renderTeachers();
+    }
+
+    async function updateNote(teacher, noteText) {
+      if (!attendanceData[currentDate]?.[currentLesson]?.[teacher]) return;
+      attendanceData[currentDate][currentLesson][teacher].note = noteText;
+      saveLocal();
+    }
+
+    async function copyToNextLesson(teacher) {
+      if (currentLesson >= 10) {
+        showToast("Это последний (10-й) урок дня");
+        return;
+      }
+      const nextLesson = currentLesson + 1;
+      const currentNote = attendanceData[currentDate]?.[currentLesson]?.[teacher]?.note || "";
+      if (!attendanceData[currentDate][nextLesson]) attendanceData[currentDate][nextLesson] = {};
+      attendanceData[currentDate][nextLesson][teacher] = { note: currentNote };
+      saveLocal();
+      renderLessonsBar();
+      showToast(`Добавлено на ${nextLesson}-й урок`);
+    }
+
+    async function onDateChange() {
+      currentDate = document.getElementById("datePicker").value || getTodayStr();
+      await loadDayData(currentDate);
+      renderLessonsBar();
+      renderTeachers();
+    }
+
+    // ==========================================
+    // ОТРИСОВКА ИНТЕРФЕЙСА
+    // ==========================================
+    function renderLessonsBar() {
+      const bar = document.getElementById("lessonsBar");
+      const dayMap = attendanceData[currentDate] || {};
+
+      bar.innerHTML = LESSONS.map(l => {
+        const count = Object.keys(dayMap[l.id] || {}).length;
+        const active = l.id === currentLesson;
+        return `
+          <button
+            onclick="selectLesson(${l.id})"
+            class="shrink-0 px-3 py-1.5 rounded-xl border text-left transition flex items-center gap-2 ${
+              active
+                ? "bg-blue-600 border-blue-600 text-white shadow-xs"
+                : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+            }"
+          >
+            <div>
+              <div class="text-xs font-bold leading-tight">${l.id} урок</div>
+              <div class="text-[10px] ${active ? "text-blue-100" : "text-slate-400"}">${l.start}</div>
+            </div>
+            ${
+              count > 0
+                ? `<span class="text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                    active ? "bg-white text-blue-700" : "bg-rose-100 text-rose-700"
+                  }">${count}</span>`
+                : ""
+            }
+          </button>
+        `;
+      }).join("");
+    }
+
+    function selectLesson(id) {
+      currentLesson = id;
+      renderLessonsBar();
+      renderTeachers();
+    }
+
+    function setFilter(f) {
+      currentFilter = f;
+      const allBtn = document.getElementById("filterAllBtn");
+      const absBtn = document.getElementById("filterAbsentBtn");
+      if (f === "all") {
+        allBtn.className = "flex-1 sm:flex-initial px-3 py-1.5 rounded-md bg-white text-slate-900 shadow-2xs transition";
+        absBtn.className = "flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-slate-600 transition";
+      } else {
+        absBtn.className = "flex-1 sm:flex-initial px-3 py-1.5 rounded-md bg-white text-rose-600 shadow-2xs transition";
+        allBtn.className = "flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-slate-600 transition";
+      }
+      renderTeachers();
+    }
+
+    function escapeHTML(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[char]);
+    }
+
+    function renderTeachers() {
+      const searchVal = document.getElementById("searchInput").value.trim().toLowerCase();
+      document.getElementById("clearSearchBtn").classList.toggle("hidden", !searchVal);
+
+      const lessonMap = attendanceData[currentDate]?.[currentLesson] || {};
+      const absentCount = Object.keys(lessonMap).length;
+      document.getElementById("absentCountLabel").textContent = absentCount;
+
+      const filtered = TEACHERS.filter(name => {
+        const matchesSearch = name.toLowerCase().includes(searchVal);
+        const isAbsent = Boolean(lessonMap[name]);
+        if (currentFilter === "absent" && !isAbsent) return false;
+        return matchesSearch;
+      });
+
+      const list = document.getElementById("teachersList");
+      if (filtered.length === 0) {
+        list.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-8 text-center text-xs text-slate-400">
+            ${currentFilter === "absent" ? "На этом уроке все преподаватели на месте" : "Преподаватель не найден"}
+          </div>
+        `;
+        return;
+      }
+
+      list.innerHTML = filtered.map(teacher => {
+        const record = lessonMap[teacher];
+        const isAbsent = Boolean(record);
+        const safeTeacher = teacher.replace(/'/g, "\\'");
+
+        return `
+          <div class="bg-white rounded-xl border ${isAbsent ? "border-rose-300 bg-rose-50/30" : "border-slate-200"} p-3 transition">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-slate-900 truncate">${escapeHTML(teacher)}</div>
+              </div>
+
+              <button
+                onclick="toggleAbsent('${safeTeacher}')"
+                class="shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
+                  isAbsent
+                    ? "bg-rose-600 text-white shadow-2xs hover:bg-rose-700"
+                    : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                }"
+              >
+                ${isAbsent ? "Отсутствует" : "На месте"}
+              </button>
+            </div>
+
+            ${
+              isAbsent
+                ? `
+              <div class="mt-2.5 pt-2.5 border-t border-rose-200/70 space-y-2">
+                <div class="flex flex-wrap gap-1.5">
+                  ${QUICK_NOTES.map(tag => `
+                    <button
+                      onclick="applyQuickNote('${safeTeacher}', '${tag}')"
+                      class="text-[11px] px-2 py-0.5 rounded-md border ${
+                        record.note === tag
+                          ? "bg-rose-600 text-white border-rose-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }"
+                    >
+                      ${tag}
+                    </button>
+                  `).join("")}
+                  ${
+                    currentLesson < 10
+                      ? `<button
+                          onclick="copyToNextLesson('${safeTeacher}')"
+                          class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                        >
+                          + на ${currentLesson + 1} урок
+                        </button>`
+                      : ""
+                  }
+                </div>
+                <input
+                  type="text"
+                  value="${escapeHTML(record.note || "")}"
+                  oninput="updateNote('${safeTeacher}', this.value)"
+                  placeholder="Комментарий (кто заменяет, причина)..."
+                  class="w-full text-xs bg-white border border-rose-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+            `
+                : ""
+            }
+          </div>
+        `;
+      }).join("");
+    }
+
+    function applyQuickNote(teacher, tag) {
+      const current = attendanceData[currentDate]?.[currentLesson]?.[teacher]?.note || "";
+      const next = current === tag ? "" : tag;
+      updateNote(teacher, next);
+      renderTeachers();
+    }
+
+    // ==========================================
+    // WHATSAPP ОТПРАВКА И КОНТАКТЫ
+    // ==========================================
+    function openWhatsAppModal() {
+      document.getElementById("waLessonNum").textContent = currentLesson;
+      setWaMode(waMode);
+      renderRecipients();
+      document.getElementById("waModal").classList.remove("hidden");
+    }
+
+    function closeWhatsAppModal() {
+      document.getElementById("waModal").classList.add("hidden");
+    }
+
+    function setWaMode(mode) {
+      waMode = mode;
+      const btnL = document.getElementById("waModeLesson");
+      const btnD = document.getElementById("waModeDay");
+      if (mode === "lesson") {
+        btnL.className = "flex-1 py-2 rounded-lg bg-white text-slate-900 shadow-2xs transition";
+        btnD.className = "flex-1 py-2 rounded-lg text-slate-600 transition";
+      } else {
+        btnD.className = "flex-1 py-2 rounded-lg bg-white text-slate-900 shadow-2xs transition";
+        btnL.className = "flex-1 py-2 rounded-lg text-slate-600 transition";
+      }
+      document.getElementById("waPreviewText").value = buildReportText();
+    }
+
+    function buildReportText() {
+      const formattedDate = currentDate.split("-").reverse().join(".");
+      const dayMap = attendanceData[currentDate] || {};
+
+      if (waMode === "lesson") {
+        const lessonObj = LESSONS.find(l => l.id === currentLesson);
+        const absMap = dayMap[currentLesson] || {};
+        const names = Object.keys(absMap);
+
+        let text = `📋 *IT & Business College AIU*\n`;
+        text += `📅 Дата: *${formattedDate}*\n`;
+        text += `⏰ Урок: *${currentLesson}-й (${lessonObj.start}–${lessonObj.end})*\n\n`;
+
+        if (names.length === 0) {
+          text += `✅ Все преподаватели на месте.`;
+        } else {
+          text += `❌ *Отсутствуют (${names.length}):*\n`;
+          names.forEach((n, i) => {
+            const note = absMap[n].note ? ` — _${absMap[n].note}_` : "";
+            text += `${i + 1}. ${n}${note}\n`;
+          });
+        }
+        return text.trim();
+      } else {
+        let text = `📋 *Сводка за день — IT & Business College AIU*\n`;
+        text += `📅 Дата: *${formattedDate}*\n\n`;
+        let hasAny = false;
+
+        LESSONS.forEach(l => {
+          const absMap = dayMap[l.id] || {};
+          const names = Object.keys(absMap);
+          if (names.length > 0) {
+            hasAny = true;
+            text += `⏰ *${l.id} урок (${l.start}):*\n`;
+            names.forEach(n => {
+              const note = absMap[n].note ? ` (${absMap[n].note})` : "";
+              text += `• ${n}${note}\n`;
+            });
+            text += `\n`;
+          }
+        });
+
+        if (!hasAny) {
+          text += `✅ За весь день отсутствующих преподавателей не зафиксировано.`;
+        }
+        return text.trim();
+      }
+    }
+
+    async function copyWaText() {
+      const txt = document.getElementById("waPreviewText").value;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(txt);
+        } else {
+          const area = document.getElementById("waPreviewText");
+          area.focus();
+          area.select();
+          if (!document.execCommand("copy")) throw new Error("Copy command failed");
+        }
+        showToast("Текст скопирован");
+      } catch (error) {
+        showToast("Не удалось скопировать. Выделите текст вручную.");
+      }
+    }
+
+    function sendToAnyChat() {
+      const txt = encodeURIComponent(document.getElementById("waPreviewText").value);
+      window.open(`https://api.whatsapp.com/send?text=${txt}`, "_blank");
+    }
+
+    function normalizeKgPhone(raw) {
+      let digits = raw.replace(/\D/g, "");
+      if (digits.startsWith("0") && digits.length === 10) {
+        digits = "996" + digits.slice(1);
+      } else if (digits.length === 9) {
+        digits = "996" + digits;
+      }
+      return digits;
+    }
+
+    function addRecipient() {
+      const name = document.getElementById("recName").value.trim();
+      const rawPhone = document.getElementById("recPhone").value.trim();
+      const phone = normalizeKgPhone(rawPhone);
+
+      if (!name || phone.length < 11) {
+        showToast("Укажите имя и корректный номер (+996...)");
+        return;
+      }
+
+      recipients.push({ id: Date.now(), name, phone });
+      safeSet("aiu_wa_recipients", JSON.stringify(recipients));
+      document.getElementById("recName").value = "";
+      document.getElementById("recPhone").value = "";
+      renderRecipients();
+      showToast("Контакт сохранён");
+    }
+
+    function removeRecipient(id) {
+      recipients = recipients.filter(r => r.id !== id);
+      safeSet("aiu_wa_recipients", JSON.stringify(recipients));
+      renderRecipients();
+    }
+
+    function sendToRecipient(phone) {
+      const txt = encodeURIComponent(document.getElementById("waPreviewText").value);
+      window.open(`https://wa.me/${phone}?text=${txt}`, "_blank");
+    }
+
+    function renderRecipients() {
+      const container = document.getElementById("recipientsList");
+      if (recipients.length === 0) {
+        container.innerHTML = `<div class="text-[11px] text-slate-400">Список пуст — добавьте номера руководства ниже.</div>`;
+        return;
+      }
+
+      container.innerHTML = recipients.map(r => `
+        <div class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+          <div class="min-w-0">
+            <div class="text-xs font-bold text-slate-800 truncate">${escapeHTML(r.name)}</div>
+            <div class="text-[11px] text-slate-500">+${escapeHTML(r.phone)}</div>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button
+              onclick="sendToRecipient('${r.phone}')"
+              class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+            >
+              Отправить
+            </button>
+            <button
+              onclick="removeRecipient(${r.id})"
+              title="Удалить"
+              class="text-slate-400 hover:text-rose-600 px-1.5 py-1 text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    // ==========================================
+    // ЭКСПОРТ В EXCEL: НЕДЕЛЯ ИЛИ ВЕСЬ ПЕРИОД
+    // ==========================================
+    function getWeekRange(dateStr) {
+      const d = new Date(dateStr + "T12:00:00");
+      const day = (d.getDay() + 6) % 7;
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - day);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const toISO = x => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;
+      return { start: toISO(monday), end: toISO(sunday) };
+    }
+
+    function exportExcelForDates(dateKeys, filePrefix, emptyMessage) {
+      const allDays = readLocalAttendance();
+      const detailRows = [];
+      const summaryRows = [];
+
+      dateKeys.sort().forEach(date => {
+        const dayMap = allDays[date] || {};
+        LESSONS.forEach(lesson => {
+          const absMap = dayMap[lesson.id] || {};
+          const absentNames = Object.keys(absMap);
+          const absentCount = absentNames.length;
+          summaryRows.push({
+            "Дата": date.split("-").reverse().join("."),
+            "Урок": `${lesson.id}-й`,
+            "Время": `${lesson.start}–${lesson.end}`,
+            "Всего преподавателей": TEACHERS.length,
+            "На месте (расчётно)": Math.max(0, TEACHERS.length - absentCount),
+            "Отсутствуют": absentCount
+          });
+          absentNames.forEach(teacher => detailRows.push({
+            "Дата": date.split("-").reverse().join("."),
+            "Урок": `${lesson.id}-й`,
+            "Время": `${lesson.start}–${lesson.end}`,
+            "Преподаватель": teacher,
+            "Статус": "Отсутствует",
+            "Причина / примечание": absMap[teacher]?.note || ""
+          }));
+        });
+      });
+
+      if (!dateKeys.length) {
+        showToast(emptyMessage || "За выбранный период пока нет сохранённых записей");
+        return;
+      }
+      if (!window.XLSX) {
+        showToast("Не загрузился модуль Excel. Проверьте интернет и обновите страницу.");
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+      const wsDetails = XLSX.utils.json_to_sheet(detailRows.length ? detailRows : [{
+        "Дата": "", "Урок": "", "Время": "", "Преподаватель": "",
+        "Статус": "Отсутствий не зафиксировано", "Причина / примечание": ""
+      }]);
+      const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+      wsDetails["!cols"] = [{wch:14},{wch:10},{wch:18},{wch:30},{wch:18},{wch:34}];
+      wsSummary["!cols"] = [{wch:14},{wch:10},{wch:18},{wch:23},{wch:23},{wch:16}];
+      XLSX.utils.book_append_sheet(wb, wsDetails, "Отсутствия");
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Сводка по урокам");
+      XLSX.writeFile(wb, `${filePrefix}_${getTodayStr()}.xlsx`);
+      showToast("Excel-отчёт сформирован");
+    }
+
+    function exportWeeklyExcel() {
+      const allDays = readLocalAttendance();
+      const range = getWeekRange(currentDate || getTodayStr());
+      const dates = Object.keys(allDays).filter(d => d >= range.start && d <= range.end);
+      exportExcelForDates(dates, `Недельный_отчёт_${range.start}_${range.end}`,
+        `За неделю ${range.start.split("-").reverse().join(".")} – ${range.end.split("-").reverse().join(".")} записей нет`);
+    }
+
+    function exportFullExcel() {
+      const allDays = readLocalAttendance();
+      exportExcelForDates(Object.keys(allDays), "Полный_отчёт_посещаемости",
+        "Пока нет сохранённых записей для отчёта");
+    }
+
+    function backupAttendance() {
+      const data = { app: "AIU Teacher Attendance", version: 1, exportedAt: new Date().toISOString(), attendance: readLocalAttendance() };
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Резервная_копия_посещаемости_${getTodayStr()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast("Резервная копия скачана");
+    }
+
+    function restoreAttendance(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          const attendance = parsed.attendance || parsed;
+          if (!attendance || typeof attendance !== "object" || Array.isArray(attendance)) throw new Error("Неверный формат");
+          if (!confirm("Восстановить данные из копии? Текущие записи будут заменены.")) {
+            event.target.value = "";
+            return;
+          }
+          if (!safeSet("aiu_attendance_v1", JSON.stringify(attendance))) {
+            showToast("Не удалось сохранить данные в браузере");
+            return;
+          }
+          attendanceData = readLocalAttendance();
+          render();
+          showToast("Данные восстановлены из резервной копии");
+        } catch (err) {
+          showToast("Файл копии повреждён или имеет неверный формат");
+        }
+        event.target.value = "";
+      };
+      reader.readAsText(file, "UTF-8");
+    }
+
+    // ==========================================
+    function exportCSV() {
+      const dayMap = attendanceData[currentDate] || {};
+      const rows = [["Дата", "Урок", "Время", "Преподаватель", "Статус", "Примечание"]];
+
+      LESSONS.forEach(l => {
+        const absMap = dayMap[l.id] || {};
+        Object.keys(absMap).forEach(teacher => {
+          rows.push([
+            currentDate,
+            `${l.id} урок`,
+            `${l.start}-${l.end}`,
+            teacher,
+            "Отсутствует",
+            absMap[teacher].note || ""
+          ]);
+        });
+      });
+
+      if (rows.length === 1) {
+        showToast("За выбранную дату нет отметок об отсутствии");
+        return;
+      }
+
+      const csvContent = "\uFEFF" + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `attendance_${currentDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.classList.remove("hidden");
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => t.classList.add("hidden"), 2500);
+    }
+  </script>
+</body>
+</html>
